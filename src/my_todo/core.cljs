@@ -18,15 +18,14 @@
       {:author "aut2" :text "text2"}
       {:author "aut3" :text "text3"}] }))
 
-;;event handler
+;;event handlers
 
 (defn add-comment [evt owner {:keys [author text add] :as data}]
   (.preventDefault evt)
-  (println (keys data))
-  (println (str author text))
-  (om/set-state! owner :author "")
-  (om/set-state! owner :text "")
-  (put! add {:author author :text text} ))
+  (when-not (or (empty? author) (empty? text))
+    (om/set-state! owner :author "")
+    (om/set-state! owner :text "")
+    (put! add {:author author :text text} )))
 
 ;;(defn handle-change [e owner {:keys [text]}]
 (defn handle-change [e owner key-name]
@@ -69,9 +68,9 @@
 
 ;;main component
 
-(defn render-comment-list [data]
+(defn render-comment-list [{:keys [comments]}]
   (apply dom/ul #js {:className "commentList"}
-    (om/build-all comment-view (:comments data))))
+    (om/build-all comment-view comments)))
 
 (defn comment-box [data owner]
   (reify
@@ -84,7 +83,6 @@
       (let [add (om/get-state owner :add)]
         (go (loop []
           (let [new-comment (<! add)]
-            (println new-comment)
             (om/transact! data :comments #(conj % new-comment))
             (recur))))))
 
