@@ -2,8 +2,8 @@
     (:require-macros [cljs.core.async.macros :refer [go]])
     (:require [om.core :as om :include-macros true]
               [om.dom :as dom :include-macros true]
-              [clojure.data :as data]
-              [cljs.core.async :refer [put! chan <!]]))
+              [cljs.core.async :refer [put! chan <!]]
+              [ajax.core :refer [GET POST]]))
 
 (enable-console-print!)
 
@@ -13,19 +13,32 @@
 
 (defonce app-state
   (atom
-    {:comments
-     [{:author "aut1" :text "text1"}
-      {:author "aut2" :text "text2"}
-      {:author "aut3" :text "text3"}] }))
+    {:comments [] }))
 
 ;;event handlers
 
-(defn add-comment [evt owner {:keys [author text add] :as data}]
+(defn simple-handler [response]
+  (.log js/console (str response)))
+
+(defn error-handler [{:keys [status status-text]}]
+  (.log js/console (str "something bad happened: " status " " status-text)))
+
+
+(defn save-commemnt [new-comment]
+  (POST "http://localhost:3000/comments"
+    {:params new-comment
+     :format :json
+     :handler simple-handler
+     :error-handler error-handler}))
+
+(defn add-comment [evt owner {:keys [author text comm] :as data}]
   (.preventDefault evt)
   (when-not (or (empty? author) (empty? text))
+    (let [new-comment {:author author :text text}]
     (om/set-state! owner :author "")
     (om/set-state! owner :text "")
-    (put! add {:author author :text text} )))
+    (put! comm [:add new-comment])
+    (save-commemnt new-comment))))
 
 ;;(defn handle-change [e owner {:keys [text]}]
 (defn handle-change [e owner key-name]
@@ -44,16 +57,15 @@
             (dom/h2 #js {:className "commentAuthor"} (:author comment))
             (dom/div nil (:text comment)))))))
 
-
-
 (defn comment-form [_ owner]
   (reify
     om/IInitState
     (init-state [_]
       {:author "",
        :text ""})
+
     om/IRenderState
-    (render-state [_ {:keys [add] :as state}]
+    (render-state [_ {:keys [comm] :as state}]
       (dom/form #js {:className "commentForm"
                      :onSubmit #(add-comment % owner state)}
         (dom/input #js {:type "text"
@@ -68,30 +80,47 @@
 
 ;;main component
 
+(defn handler [f res]
+  (f res))
+
+(defn load-data [comm]
+  (GET "http://localhost:3000/comments"
+    {:response-format :json
+     :keywords? true
+     :handler (partial handler #(put! comm [:init %] ))
+     :error-handler error-handler}))
+
+;;put! comm [:add {:author "ar" :text "tr"}]
+;;#(put! comm [:add {:author "ra" :text "rt"}])
+
 (defn render-comment-list [{:keys [comments]}]
   (apply dom/ul #js {:className "commentList"}
     (om/build-all comment-view comments)))
 
-(defn comment-box [data owner]
-  (reify
-    om/IInitState
-    (init-state [_]
-      {:add (chan)})
+(defn handle-event [t app val]
+  (case t
+    :add (om/transact! app :comments #(conj % val))
+    :init (om/update! app {:comments val})
+    nil))
 
+(defn comment-box [app owner]
+    (reify
     om/IWillMount
     (will-mount [_]
-      (let [add (om/get-state owner :add)]
-        (go (loop []
-          (let [new-comment (<! add)]
-            (om/transact! data :comments #(conj % new-comment))
-            (recur))))))
+      (let [comm (chan)]
+        (om/set-state! owner :comm comm)
+          (go
+           (load-data comm)
+           (while true
+            (let [ [t value] (<! comm)]
+              (handle-event t app value))))))
 
     om/IRenderState
-    (render-state [_ {:keys [add]}]
+    (render-state [_ {:keys [comm]}]
       (dom/div #js {:className "commentBox"}
         (dom/h1 nil "Comments")
-        (render-comment-list data)
-        (om/build comment-form nil {:init-state {:add add}})))))
+        (render-comment-list app)
+        (om/build comment-form nil {:init-state {:comm comm}})))))
 
 (om/root
   comment-box
