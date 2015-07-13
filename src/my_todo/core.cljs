@@ -15,14 +15,23 @@
   (atom
     {:comments [] }))
 
-;;event handlers
+;;ajax
 
 (defn simple-handler [response]
   (.log js/console (str response)))
 
+(defn get-comments [f res]
+  (f res))
+
 (defn error-handler [{:keys [status status-text]}]
   (.log js/console (str "something bad happened: " status " " status-text)))
 
+(defn load-data [comm]
+  (GET "http://localhost:3000/comments"
+    {:response-format :json
+     :keywords? true
+     :handler (partial get-comments #(put! comm [:init %] ))
+     :error-handler error-handler}))
 
 (defn save-commemnt [new-comment]
   (POST "http://localhost:3000/comments"
@@ -30,6 +39,8 @@
      :format :json
      :handler simple-handler
      :error-handler error-handler}))
+
+;;event handlers
 
 (defn add-comment [evt owner {:keys [author text comm] :as data}]
   (.preventDefault evt)
@@ -80,28 +91,16 @@
 
 ;;main component
 
-(defn handler [f res]
-  (f res))
-
-(defn load-data [comm]
-  (GET "http://localhost:3000/comments"
-    {:response-format :json
-     :keywords? true
-     :handler (partial handler #(put! comm [:init %] ))
-     :error-handler error-handler}))
-
-;;put! comm [:add {:author "ar" :text "tr"}]
-;;#(put! comm [:add {:author "ra" :text "rt"}])
+(defn handle-comm-event [t app val]
+  (case t
+    :add (om/transact! app :comments #(conj % val))
+    :init (om/update! app {:comments val})
+    nil))
 
 (defn render-comment-list [{:keys [comments]}]
   (apply dom/ul #js {:className "commentList"}
     (om/build-all comment-view comments)))
 
-(defn handle-event [t app val]
-  (case t
-    :add (om/transact! app :comments #(conj % val))
-    :init (om/update! app {:comments val})
-    nil))
 
 (defn comment-box [app owner]
     (reify
@@ -113,7 +112,7 @@
            (load-data comm)
            (while true
             (let [ [t value] (<! comm)]
-              (handle-event t app value))))))
+              (handle-comm-event t app value))))))
 
     om/IRenderState
     (render-state [_ {:keys [comm]}]
